@@ -3,12 +3,33 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>My Website</title>
+  <title>Macro Dashboard</title>
   <link rel="stylesheet" href="style.css">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </head>
 <body>
-  <h1>Hello, World!</h1>
-  <p>Welcome to my website.</p>
+  <div class="dashboard">
+    <div class="header">
+      <h1>Macro Dashboard</h1>
+      <button id="refreshBtn" onclick="loadData()">↻ Refresh</button>
+    </div>
+
+    <div class="card">
+      <h2>USD / KRW</h2>
+      <div class="latest" id="usdkrw-latest">Loading...</div>
+      <div class="change" id="usdkrw-change"></div>
+      <canvas id="usdkrw-chart"></canvas>
+      <div class="updated" id="usdkrw-updated"></div>
+    </div>
+
+    <div class="card">
+      <h2>Korea 10yr Government Bond Yield</h2>
+      <div class="latest" id="kr10y-latest">Loading...</div>
+      <div class="change" id="kr10y-change"></div>
+      <canvas id="kr10y-chart"></canvas>
+      <div class="updated" id="kr10y-updated"></div>
+    </div>
+  </div>
   <script src="script.js"></script>
 </body>
 </html>
