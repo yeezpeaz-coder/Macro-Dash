@@ -16,8 +16,8 @@ async function loadData() {
 
 async function fetchYahoo(ticker, id, unit, decimals) {
   try {
-    const url = `https://corsproxy.io/?${encodeURIComponent(
-      `https://query1.finance.yahoo.com/v8/finance/chart/${ticker}?interval=1d&range=1mo`
+    const url = `https://api.allorigins.win/raw?url=${encodeURIComponent(
+  `https://query1.finance.yahoo.com/v8/finance/chart/${ticker}?interval=1d&range=1mo`
     )}`;
 
     const res = await fetch(url);
