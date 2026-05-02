@@ -4,14 +4,65 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Macro Dashboard</title>
-  <link rel="stylesheet" href="style.css">
-  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: #f0f2f5;
+      color: #333;
+      padding: 20px;
+    }
+    .dashboard { max-width: 900px; margin: 0 auto; }
+    .header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 24px;
+    }
+    h1 { font-size: 1.6rem; color: #111; }
+    button {
+      background: #2563eb;
+      color: white;
+      border: none;
+      padding: 10px 20px;
+      border-radius: 8px;
+      font-size: 1rem;
+      cursor: pointer;
+    }
+    button:hover { background: #1d4ed8; }
+    button:disabled { background: #93c5fd; }
+    .card {
+      background: white;
+      border-radius: 12px;
+      padding: 24px;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.08);
+      margin-bottom: 20px;
+    }
+    h2 {
+      font-size: 1rem;
+      color: #666;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin-bottom: 8px;
+    }
+    .latest {
+      font-size: 2.4rem;
+      font-weight: 700;
+      color: #111;
+      margin-bottom: 4px;
+    }
+    .change { font-size: 1rem; margin-bottom: 20px; }
+    .positive { color: #16a34a; }
+    .negative { color: #dc2626; }
+    .updated { font-size: 0.75rem; color: #999; margin-top: 10px; }
+    canvas { max-height: 220px; }
+  </style>
 </head>
 <body>
   <div class="dashboard">
     <div class="header">
       <h1>Macro Dashboard</h1>
-      <button id="refreshBtn" onclick="loadData()">↻ Refresh</button>
+      <button id="refreshBtn">↻ Refresh</button>
     </div>
 
     <div class="card">
@@ -30,15 +81,88 @@
       <div class="updated" id="kr10y-updated"></div>
     </div>
   </div>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js" onload="init()"></script>
-  <script>
-    function init() {
-      const s = document.createElement('script');
-      s.src = 'script.js';
-      document.body.appendChild(s);
-    }
-  </script>
-</body>
 
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <script>
+    const API_KEY = '451be6f89061491c834957a24a0b1367';
+    const charts = {};
+
+    document.getElementById('refreshBtn').addEventListener('click', loadData);
+
+    async function loadData() {
+      const btn = document.getElementById('refreshBtn');
+      btn.textContent = '↻ Loading...';
+      btn.disabled = true;
+      await Promise.all([
+        fetchSeries('USD/KRW', 'usdkrw', '₩', 2, '#2563eb'),
+        fetchSeries('KR10Y',   'kr10y',   '%', 3, '#7c3aed')
+      ]);
+      btn.textContent = '↻ Refresh';
+      btn.disabled = false;
+    }
+
+    async function fetchSeries(symbol, id, unit, decimals, color) {
+      try {
+        const url = `https://api.twelvedata.com/time_series?symbol=${encodeURIComponent(symbol)}&interval=1day&outputsize=30&apikey=${API_KEY}`;
+        const res = await fetch(url);
+        const data = await res.json();
+
+        if (data.status === 'error') throw new Error(data.message);
+        if (!data.values || data.values.length === 0) throw new Error('No data');
+
+        const sorted = [...data.values].reverse();
+        const labels = sorted.map(d => d.datetime.slice(5));
+        const values = sorted.map(d => parseFloat(d.close));
+
+        const latest = values[values.length - 1];
+        const prev   = values[values.length - 2];
+        const change = latest - prev;
+        const pct    = ((change / prev) * 100).toFixed(2);
+
+        document.getElementById(`${id}-latest`).textContent =
+          latest.toFixed(decimals) + ' ' + unit;
+
+        const el = document.getElementById(`${id}-change`);
+        el.textContent = `${change >= 0 ? '+' : ''}${change.toFixed(decimals)} (${pct}%) vs prev close`;
+        el.className = 'change ' + (change >= 0 ? 'positive' : 'negative');
+
+        document.getElementById(`${id}-updated`).textContent =
+          'Last updated: ' + new Date().toLocaleString();
+
+        const ctx = document.getElementById(`${id}-chart`).getContext('2d');
+        if (charts[id]) charts[id].destroy();
+        charts[id] = new Chart(ctx, {
+          type: 'line',
+          data: {
+            labels,
+            datasets: [{
+              data: values,
+              borderColor: color,
+              backgroundColor: color + '15',
+              borderWidth: 2,
+              pointRadius: 3,
+              fill: true,
+              tension: 0.3
+            }]
+          },
+          options: {
+            responsive: true,
+            plugins: { legend: { display: false } },
+            scales: {
+              y: { ticks: { callback: v => v.toFixed(decimals) + unit } }
+            }
+          }
+        });
+
+      } catch (e) {
+        document.getElementById(`${id}-latest`).textContent = 'Error: ' + e.message;
+        document.getElementById(`${id}-change`).textContent = '';
+        console.error(id, e);
+      }
+    }
+
+    // Auto-load on page open
+    loadData();
+  </script>
 </body>
 </html>
