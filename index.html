@@ -51,6 +51,11 @@
       color: #111;
       margin-bottom: 4px;
     }
+    .sub-latest {
+      font-size: 1.1rem;
+      color: #444;
+      margin-bottom: 4px;
+    }
     .change { font-size: 1rem; margin-bottom: 20px; }
     .positive { color: #16a34a; }
     .negative { color: #dc2626; }
@@ -75,19 +80,32 @@
     </div>
 
     <div class="card">
-      <h2>Korea 10Y Treasury Bond ETF (365780.KS)</h2>
-      <div class="latest" id="kr10y-latest">Loading...</div>
+      <h2>Korea 10Y Treasury Bond — Implied Yield</h2>
+      <div class="latest" id="kr10y-yield">Loading...</div>
+      <div class="sub-latest" id="kr10y-etf"></div>
       <div class="change" id="kr10y-change"></div>
       <canvas id="kr10y-chart"></canvas>
       <div class="updated" id="kr10y-updated"></div>
-      <div class="note">ETF price is a directional proxy for the KR 10yr government bond yield. Price down = yields up.</div>
+      <div class="note">Implied yield calculated from ETF 365780.KS price using modified duration (8.7yr). Anchor: 3.75% yield at ₩85,000. Price down = yields up.</div>
     </div>
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
   <script>
     const API_KEY = '451be6f89061491c834957a24a0b1367';
+    const WORKER_URL = 'https://square-sun-8ce2.yihua-lu.workers.dev';
     const charts = {};
+
+    // Modified duration parameters
+    const MOD_DURATION = 8.7;
+    const ANCHOR_PRICE = 85000;
+    const ANCHOR_YIELD = 3.75;
+
+    function priceToYield(price) {
+      const priceChangePct = (price - ANCHOR_PRICE) / ANCHOR_PRICE;
+      const yieldChange = -priceChangePct * MOD_DURATION * 100;
+      return Math.round((ANCHOR_YIELD + yieldChange) * 1000) / 1000;
+    }
 
     document.getElementById('refreshBtn').addEventListener('click', loadData);
 
@@ -97,7 +115,7 @@
       btn.disabled = true;
       await Promise.all([
         fetchTwelve('USD/KRW', 'usdkrw', '₩', 2, '#2563eb'),
-        fetchYahoo('365780.KS', 'kr10y', '₩', 0, '#7c3aed')
+        fetchKR10Y()
       ]);
       btn.textContent = '↻ Refresh';
       btn.disabled = false;
@@ -113,41 +131,90 @@
         const sorted = [...data.values].reverse();
         const labels = sorted.map(d => d.datetime.slice(5));
         const values = sorted.map(d => parseFloat(d.close));
-        renderCard(id, labels, values, unit, decimals, color);
+        renderCard(id, labels, values, unit, decimals, '#2563eb');
       } catch (e) {
         showError(id, e.message);
       }
     }
 
-    async function fetchYahoo(symbol, id, unit, decimals, color) {
-      const yahooUrl = `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?interval=1d&range=1mo`;
-      const proxies = [
-        `https://corsproxy.io/?${encodeURIComponent(yahooUrl)}`,
-        `https://api.allorigins.win/raw?url=${encodeURIComponent(yahooUrl)}`,
-        `https://thingproxy.freeboard.io/fetch/${yahooUrl}`,
-        `https://proxy.cors.sh/${yahooUrl}`
-      ];
+    async function fetchKR10Y() {
+      try {
+        const url = `${WORKER_URL}?symbol=365780.KS`;
+        const res = await fetch(url);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        if (!data.chart || !data.chart.result || data.chart.result.length === 0) throw new Error('No data');
 
-      for (const proxyUrl of proxies) {
-        try {
-          const res = await fetch(proxyUrl, { signal: AbortSignal.timeout(8000) });
-          if (!res.ok) continue;
-          const data = await res.json();
-          if (!data.chart || !data.chart.result || data.chart.result.length === 0) continue;
-          const result = data.chart.result[0];
-          const timestamps = result.timestamp;
-          const closes = result.indicators.quote[0].close;
-          const points = timestamps
-            .map((ts, i) => ({ label: formatDate(ts), value: closes[i] }))
-            .filter(d => d.value !== null && d.value !== undefined);
-          if (points.length === 0) continue;
-          renderCard(id, points.map(d => d.label), points.map(d => d.value), unit, decimals, color);
-          return;
-        } catch (e) {
-          continue;
-        }
+        const result = data.chart.result[0];
+        const timestamps = result.timestamp;
+        const closes = result.indicators.quote[0].close;
+
+        const points = timestamps
+          .map((ts, i) => ({ label: formatDate(ts), price: closes[i] }))
+          .filter(d => d.price !== null && d.price !== undefined);
+
+        if (points.length === 0) throw new Error('All values null');
+
+        const labels = points.map(d => d.label);
+        const prices = points.map(d => d.price);
+        const yields = prices.map(p => priceToYield(p));
+
+        const latestYield = yields[yields.length - 1];
+        const prevYield   = yields[yields.length - 2];
+        const latestPrice = prices[prices.length - 1];
+        const yieldChange = latestYield - prevYield;
+        const yieldChangeBps = Math.round(yieldChange * 100);
+
+        // Show implied yield as main number
+        document.getElementById('kr10y-yield').textContent =
+          latestYield.toFixed(3) + ' %';
+
+        // Show ETF price as secondary
+        document.getElementById('kr10y-etf').textContent =
+          'ETF Price: ₩' + latestPrice.toLocaleString('en-US', { maximumFractionDigits: 0 });
+
+        // Change in yield (in basis points)
+        const changeEl = document.getElementById('kr10y-change');
+        changeEl.textContent =
+          `${yieldChange >= 0 ? '+' : ''}${yieldChangeBps}bps vs prev close`;
+        changeEl.className = 'change ' + (yieldChange >= 0 ? 'positive' : 'negative');
+
+        document.getElementById('kr10y-updated').textContent =
+          'Last updated: ' + new Date().toLocaleString();
+
+        // Draw yield chart
+        const ctx = document.getElementById('kr10y-chart').getContext('2d');
+        if (charts['kr10y']) charts['kr10y'].destroy();
+        charts['kr10y'] = new Chart(ctx, {
+          type: 'line',
+          data: {
+            labels,
+            datasets: [{
+              data: yields,
+              borderColor: '#7c3aed',
+              backgroundColor: '#7c3aed15',
+              borderWidth: 2,
+              pointRadius: 3,
+              fill: true,
+              tension: 0.3
+            }]
+          },
+          options: {
+            responsive: true,
+            plugins: { legend: { display: false } },
+            scales: {
+              y: {
+                ticks: {
+                  callback: v => v.toFixed(2) + '%'
+                }
+              }
+            }
+          }
+        });
+
+      } catch (e) {
+        showError('kr10y', e.message);
       }
-      showError(id, 'All proxies failed — try refreshing');
     }
 
     function renderCard(id, labels, values, unit, decimals, color) {
@@ -197,8 +264,10 @@
     }
 
     function showError(id, msg) {
-      document.getElementById(`${id}-latest`).textContent = 'Error: ' + msg;
-      document.getElementById(`${id}-change`).textContent = '';
+      document.getElementById(`${id}-latest`) &&
+        (document.getElementById(`${id}-latest`).textContent = 'Error: ' + msg);
+      document.getElementById(`${id}-yield`) &&
+        (document.getElementById(`${id}-yield`).textContent = 'Error: ' + msg);
       console.error(id, msg);
     }
 
@@ -210,3 +279,4 @@
     loadData();
   </script>
 </body>
+</html>
