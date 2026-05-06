@@ -1,4 +1,4 @@
-<!DOCTYPE html>  
+<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
@@ -86,7 +86,7 @@
       <div class="change" id="kr10y-change"></div>
       <canvas id="kr10y-chart"></canvas>
       <div class="updated" id="kr10y-updated"></div>
-      <div class="note">Implied yield calculated from ETF 365780.KS price using modified duration (8.7yr). Anchor: 3.75% yield at ₩85,000. Price down = yields up.</div>
+      <div class="note">Implied yield calculated from ETF 365780.KS price using modified duration (8.7yr). Anchor: 3.95% yield at ₩83,725. Price down = yields up.</div>
     </div>
   </div>
 
@@ -98,8 +98,8 @@
 
     // Modified duration parameters
     const MOD_DURATION = 8.7;
-    const ANCHOR_PRICE = 85000;
-    const ANCHOR_YIELD = 3.75;
+    const ANCHOR_PRICE = 83725;
+    const ANCHOR_YIELD = 3.95;
 
     function priceToYield(price) {
       const priceChangePct = (price - ANCHOR_PRICE) / ANCHOR_PRICE;
@@ -133,7 +133,7 @@
         const values = sorted.map(d => parseFloat(d.close));
         renderCard(id, labels, values, unit, decimals, '#2563eb');
       } catch (e) {
-        showError(id, e.message);
+        showError('usdkrw-latest', e.message);
       }
     }
 
@@ -165,15 +165,12 @@
         const yieldChange = latestYield - prevYield;
         const yieldChangeBps = Math.round(yieldChange * 100);
 
-        // Show implied yield as main number
         document.getElementById('kr10y-yield').textContent =
           latestYield.toFixed(3) + ' %';
 
-        // Show ETF price as secondary
         document.getElementById('kr10y-etf').textContent =
           'ETF Price: ₩' + latestPrice.toLocaleString('en-US', { maximumFractionDigits: 0 });
 
-        // Change in yield (in basis points)
         const changeEl = document.getElementById('kr10y-change');
         changeEl.textContent =
           `${yieldChange >= 0 ? '+' : ''}${yieldChangeBps}bps vs prev close`;
@@ -182,7 +179,6 @@
         document.getElementById('kr10y-updated').textContent =
           'Last updated: ' + new Date().toLocaleString();
 
-        // Draw yield chart
         const ctx = document.getElementById('kr10y-chart').getContext('2d');
         if (charts['kr10y']) charts['kr10y'].destroy();
         charts['kr10y'] = new Chart(ctx, {
@@ -213,7 +209,7 @@
         });
 
       } catch (e) {
-        showError('kr10y', e.message);
+        showError('kr10y-yield', e.message);
       }
     }
 
@@ -263,12 +259,10 @@
       });
     }
 
-    function showError(id, msg) {
-      document.getElementById(`${id}-latest`) &&
-        (document.getElementById(`${id}-latest`).textContent = 'Error: ' + msg);
-      document.getElementById(`${id}-yield`) &&
-        (document.getElementById(`${id}-yield`).textContent = 'Error: ' + msg);
-      console.error(id, msg);
+    function showError(elId, msg) {
+      const el = document.getElementById(elId);
+      if (el) el.textContent = 'Error: ' + msg;
+      console.error(elId, msg);
     }
 
     function formatDate(ts) {
