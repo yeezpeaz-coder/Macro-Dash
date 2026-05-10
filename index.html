@@ -17,9 +17,34 @@
       display: flex;
       justify-content: space-between;
       align-items: center;
-      margin-bottom: 24px;
+      margin-bottom: 16px;
+      flex-wrap: wrap;
+      gap: 12px;
     }
     h1 { font-size: 1.6rem; color: #111; }
+    .controls {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+    .date-label {
+      font-size: 0.9rem;
+      color: #555;
+    }
+    input[type="date"] {
+      padding: 8px 12px;
+      border: 1px solid #ddd;
+      border-radius: 8px;
+      font-size: 0.95rem;
+      color: #333;
+      background: white;
+      cursor: pointer;
+    }
+    input[type="date"]:focus {
+      outline: none;
+      border-color: #2563eb;
+    }
     button {
       background: #2563eb;
       color: white;
@@ -68,7 +93,11 @@
   <div class="dashboard">
     <div class="header">
       <h1>Macro Dashboard</h1>
-      <button id="refreshBtn">↻ Refresh</button>
+      <div class="controls">
+        <span class="date-label">From:</span>
+        <input type="date" id="startDate" />
+        <button id="refreshBtn">↻ Refresh</button>
+      </div>
     </div>
 
     <div class="card">
@@ -80,13 +109,12 @@
     </div>
 
     <div class="card">
-      <h2>Korea 10Y Treasury Bond — Implied Yield</h2>
-      <div class="latest" id="kr10y-yield">Loading...</div>
-      <div class="sub-latest" id="kr10y-etf"></div>
+      <h2>Korea 10Y Treasury Bond ETF (152380.KS)</h2>
+      <div class="latest" id="kr10y-latest">Loading...</div>
       <div class="change" id="kr10y-change"></div>
       <canvas id="kr10y-chart"></canvas>
       <div class="updated" id="kr10y-updated"></div>
-      <div class="note">Implied yield calculated from ETF 365780.KS price using modified duration (8.7yr). Anchor: 3.95% yield at ₩83,725. Price down = yields up.</div>
+      <div class="note">KODEX 10Y Futures ETF — directional proxy for KR 10yr government bond yield. Price down = yields up.</div>
     </div>
   </div>
 
@@ -96,121 +124,91 @@
     const WORKER_URL = 'https://square-sun-8ce2.yihua-lu.workers.dev';
     const charts = {};
 
-    // Modified duration parameters
-    const MOD_DURATION = 21.6;
-    const ANCHOR_PRICE = 85660;
-    const ANCHOR_YIELD = 3.70;
-
-
-    function priceToYield(price) {
-      const priceChangePct = (price - ANCHOR_PRICE) / ANCHOR_PRICE;
-      const yieldChange = -priceChangePct * MOD_DURATION * 100;
-      return Math.round((ANCHOR_YIELD + yieldChange) * 1000) / 1000;
-    }
+    // Set default start date to 1 month ago
+    const defaultStart = new Date();
+    defaultStart.setMonth(defaultStart.getMonth() - 1);
+    document.getElementById('startDate').value = defaultStart.toISOString().split('T')[0];
+    document.getElementById('startDate').max = new Date().toISOString().split('T')[0];
 
     document.getElementById('refreshBtn').addEventListener('click', loadData);
+
+    function getDateRange() {
+      const startDate = document.getElementById('startDate').value;
+      const today = new Date();
+      const start = new Date(startDate);
+      const diffDays = Math.ceil((today - start) / (1000 * 60 * 60 * 24));
+
+      // Yahoo Finance uses range strings, Twelve Data uses outputsize (number of days)
+      let yahooRange;
+      if (diffDays <= 5) yahooRange = '5d';
+      else if (diffDays <= 30) yahooRange = '1mo';
+      else if (diffDays <= 90) yahooRange = '3mo';
+      else if (diffDays <= 180) yahooRange = '6mo';
+      else if (diffDays <= 365) yahooRange = '1y';
+      else if (diffDays <= 730) yahooRange = '2y';
+      else yahooRange = '5y';
+
+      return { diffDays, yahooRange, startDate };
+    }
 
     async function loadData() {
       const btn = document.getElementById('refreshBtn');
       btn.textContent = '↻ Loading...';
       btn.disabled = true;
+      const { diffDays, yahooRange, startDate } = getDateRange();
       await Promise.all([
-        fetchTwelve('USD/KRW', 'usdkrw', '₩', 2, '#2563eb'),
-        fetchKR10Y()
+        fetchTwelve('USD/KRW', 'usdkrw', '₩', 2, '#2563eb', diffDays, startDate),
+        fetchWorker('152380.KS', 'kr10y', '₩', 0, '#7c3aed', yahooRange)
       ]);
       btn.textContent = '↻ Refresh';
       btn.disabled = false;
     }
 
-    async function fetchTwelve(symbol, id, unit, decimals, color) {
+    async function fetchTwelve(symbol, id, unit, decimals, color, diffDays, startDate) {
       try {
-        const url = `https://api.twelvedata.com/time_series?symbol=${encodeURIComponent(symbol)}&interval=1day&outputsize=30&apikey=${API_KEY}`;
+        const outputsize = Math.min(Math.ceil(diffDays * 1.5), 5000);
+        const url = `https://api.twelvedata.com/time_series?symbol=${encodeURIComponent(symbol)}&interval=1day&outputsize=${outputsize}&apikey=${API_KEY}`;
         const res = await fetch(url);
         const data = await res.json();
         if (data.status === 'error') throw new Error(data.message);
         if (!data.values || data.values.length === 0) throw new Error('No data');
-        const sorted = [...data.values].reverse();
+
+        // Filter to start date
+        const start = new Date(startDate);
+        const sorted = [...data.values]
+          .reverse()
+          .filter(d => new Date(d.datetime) >= start);
+
         const labels = sorted.map(d => d.datetime.slice(5));
         const values = sorted.map(d => parseFloat(d.close));
-        renderCard(id, labels, values, unit, decimals, '#2563eb');
+        renderCard(id, labels, values, unit, decimals, color);
       } catch (e) {
-        showError('usdkrw-latest', e.message);
+        showError(`${id}-latest`, e.message);
       }
     }
 
-    async function fetchKR10Y() {
+    async function fetchWorker(symbol, id, unit, decimals, color, yahooRange) {
       try {
-        const url = `${WORKER_URL}?symbol=365780.KS`;
+        const url = `${WORKER_URL}?symbol=${encodeURIComponent(symbol)}&range=${yahooRange}`;
         const res = await fetch(url);
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
         if (!data.chart || !data.chart.result || data.chart.result.length === 0) throw new Error('No data');
 
         const result = data.chart.result[0];
+        const startDate = new Date(document.getElementById('startDate').value);
         const timestamps = result.timestamp;
         const closes = result.indicators.quote[0].close;
 
         const points = timestamps
-          .map((ts, i) => ({ label: formatDate(ts), price: closes[i] }))
-          .filter(d => d.price !== null && d.price !== undefined);
+          .map((ts, i) => ({ label: formatDate(ts), value: closes[i], date: new Date(ts * 1000) }))
+          .filter(d => d.value !== null && d.value !== undefined && d.date >= startDate);
 
-        if (points.length === 0) throw new Error('All values null');
+        if (points.length === 0) throw new Error('No data in range');
 
-        const labels = points.map(d => d.label);
-        const prices = points.map(d => d.price);
-        const yields = prices.map(p => priceToYield(p));
-
-        const latestYield = yields[yields.length - 1];
-        const prevYield   = yields[yields.length - 2];
-        const latestPrice = prices[prices.length - 1];
-        const yieldChange = latestYield - prevYield;
-        const yieldChangeBps = Math.round(yieldChange * 100);
-
-        document.getElementById('kr10y-yield').textContent =
-          latestYield.toFixed(3) + ' %';
-
-        document.getElementById('kr10y-etf').textContent =
-          'ETF Price: ₩' + latestPrice.toLocaleString('en-US', { maximumFractionDigits: 0 });
-
-        const changeEl = document.getElementById('kr10y-change');
-        changeEl.textContent =
-          `${yieldChange >= 0 ? '+' : ''}${yieldChangeBps}bps vs prev close`;
-        changeEl.className = 'change ' + (yieldChange >= 0 ? 'positive' : 'negative');
-
-        document.getElementById('kr10y-updated').textContent =
-          'Last updated: ' + new Date().toLocaleString();
-
-        const ctx = document.getElementById('kr10y-chart').getContext('2d');
-        if (charts['kr10y']) charts['kr10y'].destroy();
-        charts['kr10y'] = new Chart(ctx, {
-          type: 'line',
-          data: {
-            labels,
-            datasets: [{
-              data: yields,
-              borderColor: '#7c3aed',
-              backgroundColor: '#7c3aed15',
-              borderWidth: 2,
-              pointRadius: 3,
-              fill: true,
-              tension: 0.3
-            }]
-          },
-          options: {
-            responsive: true,
-            plugins: { legend: { display: false } },
-            scales: {
-              y: {
-                ticks: {
-                  callback: v => v.toFixed(2) + '%'
-                }
-              }
-            }
-          }
-        });
-
+        renderCard(id, points.map(d => d.label), points.map(d => d.value), unit, decimals, color);
       } catch (e) {
-        showError('kr10y-yield', e.message);
+        showError(`${id}-latest`, e.message);
       }
     }
 
@@ -241,7 +239,7 @@
             borderColor: color,
             backgroundColor: color + '15',
             borderWidth: 2,
-            pointRadius: 3,
+            pointRadius: labels.length > 60 ? 0 : 3,
             fill: true,
             tension: 0.3
           }]
@@ -270,6 +268,9 @@
       const d = new Date(ts * 1000);
       return `${d.getMonth() + 1}/${d.getDate()}`;
     }
+
+    // Also need to update the Cloudflare Worker to accept a range parameter
+    // The worker URL call now passes &range= so update your worker code too
 
     loadData();
   </script>
